@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taichi_3d_ellipsoid"
+version = "0.1.0"
+description = "render 3d ellipsoid with taichi."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+    {name = "EverNorif", email = "evernorif@gmail.com"}
+]
+dependencies = [
+    "taichi>=1.6.0"
+]
+
+[tool.setuptools]
+packages = ["taichi_3d_ellipsoid"]
+
+[project.urls]
+"Homepage" = "https://github.com/EverNorif/taichi_3d_ellipsoid"
+"Bug Tracker" = "https://github.com/EverNorif/taichi_3d_ellipsoid/issues" 
