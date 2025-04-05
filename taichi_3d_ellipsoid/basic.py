@@ -30,6 +30,7 @@ class EllipsoidRenderer:
         diffuse_strength:float=0.6,
         headless:bool=False,
         opacity_limit:float=0.2,
+        ti_arch=ti.gpu,
         ):
         """
         Args:
@@ -50,7 +51,7 @@ class EllipsoidRenderer:
         """
         
         # taichi init
-        ti.init(arch=ti.gpu)
+        ti.init(arch=ti_arch)
 
         # ellipsoid params
         self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, rotations, opacities, arr_type)
@@ -77,7 +78,8 @@ class EllipsoidRenderer:
         self.window = ti.ui.Window(
             name="Taichi Ellipsoid Renderer", 
             res=(self.res_x, self.res_y), 
-            show_window=not self.headless
+            show_window=not self.headless,
+            vsync=True
         )
         self.canvas = self.window.get_canvas()
         

@@ -1,4 +1,5 @@
 import numpy as np
+import taichi as ti
 
 from taichi_3d_ellipsoid.basic import EllipsoidRenderer
 
@@ -164,6 +165,7 @@ if __name__ == "__main__":
             opacity_limit=0.2,
             background_color=(0.5, 0.5, 0.5),
             headless=True,
+            ti_arch=ti.gpu,  # NOTE: if you use Mac, please change to ti.vulkan, otherwise the image can be incomplete
         )
         renderer.render_image(
             output_path="example.png",
