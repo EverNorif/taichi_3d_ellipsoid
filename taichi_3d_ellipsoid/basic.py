@@ -7,6 +7,8 @@ class Ellipsoid:
     center: ti.types.vector(3, ti.f32)
     radii: ti.types.vector(3, ti.f32)
     color: ti.types.vector(3, ti.f32)
+    rotation: ti.types.matrix(3, 3, ti.f32)
+    opacity: ti.f32
 
 @ti.data_oriented
 class EllipsoidRenderer:
@@ -15,8 +17,10 @@ class EllipsoidRenderer:
         centers,
         radii,
         colors,
+        rotations,
+        opacities,
         arr_type: str="numpy",  # numpy or torch
-        res:Tuple[int, int]=(1920, 1080),
+        res:Tuple[int, int]=(1024, 1024),
         camera_pos:Tuple[float, float, float]=(0.0, 0.0, 5.0),
         camera_lookat:Tuple[float, float, float]=(0.0, 0.0, 0.0),
         camera_up:Tuple[float, float, float]=(0.0, 1.0, 0.0),
@@ -26,12 +30,29 @@ class EllipsoidRenderer:
         diffuse_strength:float=0.6,
         headless:bool=False,
         ):
+        """
+        Args:
+            centers: list of centers of ellipsoids
+            radii: list of radii of ellipsoids
+            colors: list of colors of ellipsoids
+            opacities: list of opacities of ellipsoids
+            arr_type: numpy or torch
+            res: resolution of the image
+            camera_pos: position of the camera
+            camera_lookat: lookat of the camera
+            camera_up: up of the camera
+            fov: field of view of the camera
+            background_color: background color of the image 
+            ambient: ambient light of the scene
+            diffuse_strength: diffuse strength of the scene
+            headless: whether to run in headless mode
+        """
         
         # taichi init
         ti.init(arch=ti.gpu)
 
         # ellipsoid params
-        self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, arr_type)
+        self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, rotations, opacities, arr_type)
         self.num_ellipsoids = self.ellipsoids.shape[0]
         
         # camera params
@@ -69,17 +90,22 @@ class EllipsoidRenderer:
         self.light_position = ti.Vector.field(3, dtype=ti.f32, shape=())
         self.light_position[None] = ti.Vector(self.start_camera_pos)
 
-    def _initialize_ellipsoids(self, centers, radii, colors, arr_type):
-        assert len(centers) == len(radii) == len(colors), "centers, radii, colors must have the same length"
+    def _initialize_ellipsoids(self, centers, radii, colors, rotations, opacities, arr_type):
+        assert len(centers) == len(radii) == len(colors) == len(rotations) == len(opacities), \
+            "centers, radii, colors, rotations, opacities must have the same length"
         ellipsoids = Ellipsoid.field(shape=len(centers))
         if arr_type == "numpy":
             ellipsoids.center.from_numpy(centers)
             ellipsoids.radii.from_numpy(radii)
             ellipsoids.color.from_numpy(colors)
+            ellipsoids.rotation.from_numpy(rotations)
+            ellipsoids.opacity.from_numpy(opacities)
         elif arr_type == "torch":
             ellipsoids.center.from_torch(centers)
             ellipsoids.radii.from_torch(radii)
             ellipsoids.color.from_torch(colors)
+            ellipsoids.rotation.from_torch(rotations)
+            ellipsoids.opacity.from_torch(opacities)
         else:
             raise ValueError(f"Unsupported array type: {arr_type}")
         
@@ -104,14 +130,30 @@ class EllipsoidRenderer:
         return v / ti.sqrt(v.dot(v))
 
     @ti.func
-    def ray_ellipsoid_intersection(self, ray_origin, ray_dir, center, radii):
+    def ray_ellipsoid_intersection(self, ray_origin, ray_dir, center, radii, rotation):
         """calculate the intersection between ray and ellipsoid"""
         # transform ray to ellipsoid local space
         oc = ray_origin - center
         
+        # apply the inverse rotation
+        # rotation is a forward rotation matrix, its transpose is the inverse rotation (because rotation matrix is orthogonal)
+        inv_rotation = rotation.transpose()
+        
+        # transform ray direction and origin to ellipsoid local space
+        local_dir = inv_rotation @ ray_dir
+        local_oc = inv_rotation @ oc
+        
         # scale ray direction and origin, transform ellipsoid to unit sphere
-        scaled_dir = ti.Vector([ray_dir[0] / radii[0], ray_dir[1] / radii[1], ray_dir[2] / radii[2]])
-        scaled_oc = ti.Vector([oc[0] / radii[0], oc[1] / radii[1], oc[2] / radii[2]])
+        scaled_dir = ti.Vector([
+            local_dir[0] / radii[0],
+            local_dir[1] / radii[1],
+            local_dir[2] / radii[2]
+        ])
+        scaled_oc = ti.Vector([
+            local_oc[0] / radii[0],
+            local_oc[1] / radii[1],
+            local_oc[2] / radii[2]
+        ])
         
         # solve quadratic equation
         a = scaled_dir.dot(scaled_dir)
@@ -139,16 +181,19 @@ class EllipsoidRenderer:
                 is_hit = True
                 t = t_temp
                 
-                # calculate the intersection point
-                intersection_point = ray_origin + t * ray_dir
+                # calculate the intersection point in local space
+                local_intersection = local_oc + t * local_dir
                 
-                # calculate the normal
-                normal = ti.Vector([
-                    (intersection_point[0] - center[0]) / (radii[0] * radii[0]),
-                    (intersection_point[1] - center[1]) / (radii[1] * radii[1]),
-                    (intersection_point[2] - center[2]) / (radii[2] * radii[2])
+                # calculate the normal in local space
+                local_normal = ti.Vector([
+                    local_intersection[0] / (radii[0] * radii[0]),
+                    local_intersection[1] / (radii[1] * radii[1]),
+                    local_intersection[2] / (radii[2] * radii[2])
                 ])
-                normal = self.normalize(normal)
+                
+                # transform normal to world space and normalize
+                # note: normal transformation needs to use rotation matrix instead of its inverse
+                normal = self.normalize(rotation @ local_normal)
         
         return is_hit, t, normal
 
@@ -193,16 +238,21 @@ class EllipsoidRenderer:
             
             # detect the intersection between ray and all ellipsoids
             for e_idx in range(self.num_ellipsoids):
-                hit, t, normal = self.ray_ellipsoid_intersection(
-                    camera_pos, ray_dir, self.ellipsoids[e_idx].center, self.ellipsoids[e_idx].radii
-                )
-                
-                if hit and t < closest_t:
-                    closest_hit = True
-                    closest_t = t
-                    closest_normal = normal
-                    closest_color = self.ellipsoids[e_idx].color
-                    closest_idx = e_idx
+                if self.ellipsoids[e_idx].opacity >= 0.2:
+                    hit, t, normal = self.ray_ellipsoid_intersection(
+                        camera_pos, 
+                        ray_dir, 
+                        self.ellipsoids[e_idx].center, 
+                        self.ellipsoids[e_idx].radii, 
+                        self.ellipsoids[e_idx].rotation
+                    )
+                    
+                    if hit and t < closest_t:
+                        closest_hit = True
+                        closest_t = t
+                        closest_normal = normal
+                        closest_color = self.ellipsoids[e_idx].color
+                        closest_idx = e_idx
             
             # if there is an intersection, calculate the shading
             if closest_hit:
@@ -224,9 +274,8 @@ class EllipsoidRenderer:
                 
                 color = ambient_component + diffuse_component + specular_component
                 
-                # don't process shadow each ellipsoid
+                # don't process shadow between each ellipsoid
                 shadow_factor = 1.0
-                shadow_origin = hit_point + closest_normal * 0.001  # avoid self-shadow
                 color = ambient_component + (diffuse_component + specular_component) * shadow_factor
             
             color = ti.min(ti.max(color, 0.0), 1.0)
