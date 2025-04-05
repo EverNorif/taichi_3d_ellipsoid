@@ -19,7 +19,17 @@ In `run_example.py`, we provide two examples to demonstrate how to use the `Elli
 
 In Example 1, we randomly initialize various parameters of ellipsoids in a box and use GUI for visualization, where you can control the camera through keyboard and mouse. You can see the following effect like:
 
+<p align="center">
+  <img height="300" alt="example1" src="https://github.com/user-attachments/assets/0226cd10-4ffb-44d9-89ae-f499c866b400" />
+</p>
+
+
 In Example 2, we load various parameters of ellipsoids from a 3DGS ply file, then specify the corresponding camera parameters to save the image. We provide `example.ply` [here](https://drive.google.com/file/d/17pQjk7sCkirzP6TBiMKyMVmGVxs5AHGe/view?usp=sharing).
+
+<p align="center">
+  <img height="300" alt="example2" src="https://github.com/user-attachments/assets/4812e97a-fe38-4ea9-bf75-965b547a9a6a" />
+</p>
+
 
 Note that if you are using Mac platform, you should change the `ti.arch` to `ti.vulkan`, otherwise the saved image may be incomplete.
 
