@@ -59,11 +59,81 @@ def random_generate_ellipsoids(num_ellipsoids: int, box_size: float = 10.0):
         np.array(colors, dtype=np.float32), np.array(rotations, dtype=np.float32), \
         np.array(opacities, dtype=np.float32)
 
+def normalize(quaternions):
+    norm = np.sqrt(np.sum(quaternions * quaternions, axis=-1, keepdims=True))
+    norm = np.maximum(norm, 1e-8)
+    return quaternions / norm
+
+def sigmoid(x):
+    x = np.clip(x, -88, 88)
+    return 1.0 / (1.0 + np.exp(-x))
+
+def quat_to_rotmat(quats):
+    N = quats.shape[0]
+    rotmats = np.zeros((N, 3, 3), dtype=np.float32)
+    
+    w = quats[:, 0]
+    x = quats[:, 1]
+    y = quats[:, 2]
+    z = quats[:, 3]
+    
+    rotmats[:, 0, 0] = 1 - 2*y*y - 2*z*z
+    rotmats[:, 0, 1] = 2*x*y - 2*w*z
+    rotmats[:, 0, 2] = 2*x*z + 2*w*y
+    
+    rotmats[:, 1, 0] = 2*x*y + 2*w*z
+    rotmats[:, 1, 1] = 1 - 2*x*x - 2*z*z
+    rotmats[:, 1, 2] = 2*y*z - 2*w*x
+    
+    rotmats[:, 2, 0] = 2*x*z - 2*w*y
+    rotmats[:, 2, 1] = 2*y*z + 2*w*x
+    rotmats[:, 2, 2] = 1 - 2*x*x - 2*y*y
+    
+    return rotmats
+
+def load_ellipsoids_from_ply(ply_file_path: str):
+    from plyfile import PlyData
+
+    ply_data = PlyData.read(ply_file_path)
+    vertices = ply_data['vertex']
+    num_points = len(vertices)
+
+    centers = np.zeros((num_points, 3), dtype=np.float32)
+    centers[:, 0] = vertices['x']
+    centers[:, 1] = vertices['y']
+    centers[:, 2] = vertices['z']
+
+    radii = np.zeros((num_points, 3), dtype=np.float32)
+    radii[:, 0] = vertices['scale_0']
+    radii[:, 1] = vertices['scale_1']
+    radii[:, 2] = vertices['scale_2']
+    radii = np.exp(radii)
+
+    colors = np.zeros((num_points, 3), dtype=np.float32)
+    colors[:, 0] = vertices['f_dc_0']
+    colors[:, 1] = vertices['f_dc_1']
+    colors[:, 2] = vertices['f_dc_2']
+    C0 = 0.28209479177387814
+    colors = colors * C0 + 0.5
+
+    quats = np.zeros((num_points, 4), dtype=np.float32)
+    quats[:, 0] = vertices['rot_0']
+    quats[:, 1] = vertices['rot_1']
+    quats[:, 2] = vertices['rot_2']
+    quats[:, 3] = vertices['rot_3']
+    quats = normalize(quats) # wxyz
+    rotations = quat_to_rotmat(quats)
+
+    opacities = np.ones(num_points, dtype=np.float32)
+    opacities[:] = vertices['opacity']
+    opacities = sigmoid(opacities)
+
+    return centers, radii, colors, rotations, opacities
 
 if __name__ == "__main__":
-    example_case = 0 # PARAMETERS HERE
+    example_case = 2 # PARAMETERS HERE
 
-    if example_case == 0:
+    if example_case == 1:
         # generate random ellipsoids
         print("Example 1: random ellipsoids from numpy")
         centers, radii, colors, rotations, opacities = random_generate_ellipsoids(
@@ -78,6 +148,34 @@ if __name__ == "__main__":
             opacities=opacities,
             arr_type="numpy"
         )
+        renderer.run_gui()
+    elif example_case == 2:
+        print("Example 2: load ellipsoids from 3dgs ply file")
+        centers, radii, colors, rotations, opacities = load_ellipsoids_from_ply(
+            ply_file_path="example.ply" # PARAMETERS HERE
+        )
+        print("centers.shape", centers.shape)
+        print("centers", centers.max(), centers.min())
+        print("radii.shape", radii.shape)
+        print("radii", radii.max(), radii.min())
+        print("colors.shape", colors.shape)
+        print("colors", colors.max(), colors.min())
+        renderer = EllipsoidRenderer(
+            centers=centers,
+            radii=radii,
+            colors=colors,
+            rotations=rotations,
+            opacities=opacities,
+            arr_type="numpy",
+            opacity_limit=0.5,
+            background_color=(1.0, 1.0, 1.0),
+        )
+        # renderer.render_image(
+        #     output_path="example.png",
+        #     camera_pos=(1, 1, 1),
+        #     camera_lookat=(0, 0, 0),
+        #     camera_up=(0, 1, 0),
+        # )
         renderer.run_gui()
     else:
         raise ValueError(f"Unsupported case: {example_case}")

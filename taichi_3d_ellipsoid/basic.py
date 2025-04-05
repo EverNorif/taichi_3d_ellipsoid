@@ -29,6 +29,7 @@ class EllipsoidRenderer:
         ambient:float=0.2,
         diffuse_strength:float=0.6,
         headless:bool=False,
+        opacity_limit:float=0.2,
         ):
         """
         Args:
@@ -61,6 +62,7 @@ class EllipsoidRenderer:
         self.start_camera_lookat = camera_lookat
         self.start_camera_up = camera_up
         self.start_fov = fov
+        self.opacity_limit = opacity_limit
         
         # canvas pixels
         self.pixels = ti.Vector.field(3, dtype=ti.f32, shape=(self.res_x, self.res_y))
@@ -238,7 +240,7 @@ class EllipsoidRenderer:
             
             # detect the intersection between ray and all ellipsoids
             for e_idx in range(self.num_ellipsoids):
-                if self.ellipsoids[e_idx].opacity >= 0.2:
+                if self.ellipsoids[e_idx].opacity >= self.opacity_limit:
                     hit, t, normal = self.ray_ellipsoid_intersection(
                         camera_pos, 
                         ray_dir, 
@@ -324,5 +326,7 @@ class EllipsoidRenderer:
         self._update_camera_params()
         self.render()
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        directory = os.path.dirname(output_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
         ti.tools.imwrite(self.pixels, output_path)
