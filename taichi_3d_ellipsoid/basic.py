@@ -24,7 +24,7 @@ class EllipsoidRenderer:
         camera_pos:Tuple[float, float, float]=(0.0, 0.0, 5.0),
         camera_lookat:Tuple[float, float, float]=(0.0, 0.0, 0.0),
         camera_up:Tuple[float, float, float]=(0.0, 1.0, 0.0),
-        fov:float=100.0,
+        fov:float=60.0,
         background_color:Tuple[float, float, float]=(0.05, 0.05, 0.05),
         ambient:float=0.2,
         diffuse_strength:float=0.6,

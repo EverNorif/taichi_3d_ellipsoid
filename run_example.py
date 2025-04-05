@@ -1,6 +1,6 @@
 import numpy as np
 
-from taichi_3d_ellipsoid.basic import EllipsoidRenderer, Ellipsoid
+from taichi_3d_ellipsoid.basic import EllipsoidRenderer
 
 def euler_to_rotation_matrix(euler_angles):
     rx, ry, rz = euler_angles[0], euler_angles[1], euler_angles[2]
@@ -154,12 +154,6 @@ if __name__ == "__main__":
         centers, radii, colors, rotations, opacities = load_ellipsoids_from_ply(
             ply_file_path="example.ply" # PARAMETERS HERE
         )
-        print("centers.shape", centers.shape)
-        print("centers", centers.max(), centers.min())
-        print("radii.shape", radii.shape)
-        print("radii", radii.max(), radii.min())
-        print("colors.shape", colors.shape)
-        print("colors", colors.max(), colors.min())
         renderer = EllipsoidRenderer(
             centers=centers,
             radii=radii,
@@ -167,15 +161,15 @@ if __name__ == "__main__":
             rotations=rotations,
             opacities=opacities,
             arr_type="numpy",
-            opacity_limit=0.5,
-            background_color=(1.0, 1.0, 1.0),
+            opacity_limit=0.2,
+            background_color=(0.5, 0.5, 0.5),
+            headless=True,
         )
-        # renderer.render_image(
-        #     output_path="example.png",
-        #     camera_pos=(1, 1, 1),
-        #     camera_lookat=(0, 0, 0),
-        #     camera_up=(0, 1, 0),
-        # )
-        renderer.run_gui()
+        renderer.render_image(
+            output_path="example.png",
+            camera_pos=(0.0, -0.6, 0.0),
+            camera_lookat=(0, 0, 0),
+            camera_up=(0, 0, 1),
+        )
     else:
         raise ValueError(f"Unsupported case: {example_case}")
