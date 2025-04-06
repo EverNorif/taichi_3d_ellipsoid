@@ -38,12 +38,14 @@ class EllipsoidRenderer:
         headless:bool=False,
         opacity_limit:float=0.2,
         ti_arch=ti.gpu,
+        device:str="cuda:0",
         ):
         """
         Args:
             centers: list of centers of ellipsoids
             radii: list of radii of ellipsoids
             colors: list of colors of ellipsoids
+            rotations: list of rotations of ellipsoids
             opacities: list of opacities of ellipsoids
             arr_type: numpy or torch
             res: resolution of the image
@@ -55,13 +57,19 @@ class EllipsoidRenderer:
             ambient: ambient light of the scene
             diffuse_strength: diffuse strength of the scene
             headless: whether to run in headless mode
+            opacity_limit: opacity limit of the ellipsoids
+            ti_arch: taichi arch
+            device: device to run on. Only used when arr_type is torch.
         """
         
         # taichi init
         ti.init(arch=ti_arch)
+        self.arr_type = arr_type
+        assert self.arr_type in ["numpy", "torch"], f"Unsupported array type: {self.arr_type}"
+        self.device = device
 
         # ellipsoid params
-        self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, rotations, opacities, arr_type)
+        self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, rotations, opacities, self.arr_type)
         self.num_ellipsoids = self.ellipsoids.shape[0]
         self.visible = ti.field(ti.i32, self.num_ellipsoids)
         
@@ -118,8 +126,6 @@ class EllipsoidRenderer:
             ellipsoids.color.from_torch(colors)
             ellipsoids.rotation.from_torch(rotations)
             ellipsoids.opacity.from_torch(opacities)
-        else:
-            raise ValueError(f"Unsupported array type: {arr_type}")
         
         return ellipsoids
     
@@ -391,7 +397,12 @@ class EllipsoidRenderer:
         self._update_camera_params()
         self.render()
 
-        directory = os.path.dirname(output_path)
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        ti.tools.imwrite(self.pixels, output_path)
+        if output_path is not None:
+            directory = os.path.dirname(output_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            ti.tools.imwrite(self.pixels, output_path)
+        if self.arr_type == "torch":
+            return self.pixels.to_torch(device=self.device)
+        elif self.arr_type == "numpy":
+            return self.pixels.to_numpy()
