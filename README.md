@@ -35,3 +35,9 @@ Note that if you are using Mac platform, you should change the `ti.arch` to `ti.
 
 > Usually a 3DGS ply contains a very large number of particles, and currently the rendering FPS and speed are still very low.
 
+
+## Visualization with taichi.js
+
+We use [taichi.js](https://github.com/AmesingFlank/taichi.js) to visualize the ellipsoid rendering results [here](https://evernorif.github.io/taichi_3d_ellipsoid/). Related code can be found in the `docs` folder.
+
+The basic demonstration can be found on [taichi.js_playground](https://taichi-js.com/playground/game-of-life). You can find the related source code in [StackBlitz](https://stackblitz.com/edit/taichi-js-game-of-life?file=index.js), which includes just one `index.html` and one `index.js`.

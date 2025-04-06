@@ -2,11 +2,51 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Jelly</title>
+    <title>taichi-3d-ellipsoids</title>
+    <style>
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 20px;
+        min-height: 100vh;
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+      }
+      h1, h2 {
+        text-align: center;
+        color: #333;
+      }
+      canvas {
+        border: 1px solid #ddd;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        margin: 20px 0;
+        max-width: 100%;
+        height: auto;
+      }
+      .github-link {
+        margin-top: 20px;
+        display: inline-block;
+        padding: 8px 16px;
+        background-color: #24292e;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: bold;
+        transition: background-color 0.3s;
+      }
+      .github-link:hover {
+        background-color: #0366d6;
+      }
+    </style>
   </head>
 
   <body>
-    <h1 id="hint">Loading...</h1>
+    <h1>Random 3D Ellipsoids Rendering</h1>
+    <h2 id="hint">Loading...</h2>
+    <a href="https://github.com/evernorif/taichi_3d_ellipsoid" target="_blank" class="github-link">View GitHub Code</a>
     <canvas id="result_canvas"></canvas>
     <script src="index.js"></script>
   </body>

@@ -1,532 +1,414 @@
 let main = async () => {
-  let htmlCanvas = document.getElementById('result_canvas');
-  htmlCanvas.width = 512;
-  htmlCanvas.height = 512;
-
   await ti.init();
 
-  let steps = 25;
-  let n_grid = 32;
-  let dt = 1e-4;
-
-  let cube_dim = 0.2;
-  let cube_dim_particles = 13;
-  let cube_num_particles = cube_dim_particles ** 3;
-  let num_cubes = 5;
-  let n_particles = num_cubes * cube_num_particles;
-
-  let dx = 1 / n_grid;
-  let p_vol = (dx * 0.5) ** 2;
-  let p_rho = 1;
-  let p_mass = p_vol * p_rho;
-  let E = 100;
-  let nu = 0.2; // Poisson's ratio
-  let mu_0 = E / (2 * (1 + nu));
-  let lambda_0 = (E * nu) / ((1 + nu) * (1 - 2 * nu)); // Lame parameters
-  let gravity = ti.Vector.field(3, ti.f32, [1]);
-
-  let x = ti.Vector.field(3, ti.f32, [n_particles]); // position
-  let v = ti.Vector.field(3, ti.f32, [n_particles]); // velocity
-  let C = ti.Matrix.field(3, 3, ti.f32, [n_particles]); // affine vel field
-  let F = ti.Matrix.field(3, 3, ti.f32, n_particles); // deformation gradient
-  let Jp = ti.field(ti.f32, [n_particles]); // plastic deformation
-  let grid_v = ti.Vector.field(3, ti.f32, [n_grid, n_grid, n_grid]);
-  let grid_m = ti.field(ti.f32, [n_grid, n_grid, n_grid]);
-
-  let WATER = 0;
-  let JELLY = 1;
-  let SNOW = 2;
-  let material = ti.field(ti.i32, [n_particles]); // material id
-
+  // get canvas element
+  let htmlCanvas = document.getElementById('result_canvas');
+  htmlCanvas.width = 1280;
+  htmlCanvas.height = 720;
+  let canvas = new ti.Canvas(htmlCanvas);
+  
+  // ellipsoid number
+  const n_ellipsoids = 50;
+  
+  // ellipsoid data structure
+  let ellipsoidType = ti.types.struct({
+    center: ti.types.vector(ti.f32, 3),
+    radii: ti.types.vector(ti.f32, 3),
+    color: ti.types.vector(ti.f32, 3),
+    rotation: ti.types.matrix(ti.f32, 3, 3),
+    opacity: ti.f32
+  });
+  
+  // create ellipsoid array
+  let ellipsoids = ti.field(ellipsoidType, n_ellipsoids);
+  
+  // rendering parameters
+  let res_x = htmlCanvas.width;
+  let res_y = htmlCanvas.height;
+  let camera_pos = ti.Vector.field(3, ti.f32, [1]);
+  let camera_lookat = ti.Vector.field(3, ti.f32, [1]);
+  let camera_up = ti.Vector.field(3, ti.f32, [1]);
+  let light_position = ti.Vector.field(3, ti.f32, [1]);
+  let fov = 60.0 * Math.PI / 180.0;
+  let background_color = [0.05, 0.05, 0.05];
+  let ambient = 0.2;
+  let diffuse_strength = 0.6;
+  let opacity_limit = 0.2;
+  
+  // rendering result
+  let pixels = ti.Vector.field(3, ti.f32, [res_x, res_y]);
+  
   ti.addToKernelScope({
-    n_particles,
-    n_grid,
-    dx,
-    dt,
-    p_vol,
-    p_rho,
-    p_mass,
-    E,
-    nu,
-    mu_0,
-    lambda_0,
-    gravity,
-    x,
-    v,
-    C,
-    F,
-    material,
-    Jp,
-    grid_v,
-    grid_m,
-    WATER,
-    SNOW,
-    JELLY,
-    cube_dim,
-    cube_dim_particles,
-    cube_num_particles,
-    num_cubes,
+    n_ellipsoids,
+    ellipsoids,
+    res_x,
+    res_y,
+    pixels,
+    camera_pos,
+    camera_lookat,
+    camera_up,
+    light_position,
+    fov,
+    background_color,
+    ambient,
+    diffuse_strength,
+    opacity_limit
   });
 
-  let substep = ti.kernel(() => {
-    for (let I of ti.ndrange(n_grid, n_grid, n_grid)) {
-      grid_v[I] = [0, 0, 0];
-      grid_m[I] = 0;
-    }
-    for (let p of ti.range(n_particles)) {
-      let Xp = x[p] / dx;
-      let base = i32(Xp - 0.5);
-      let fx = Xp - base;
-      let w = [
-        0.5 * (1.5 - fx) ** 2,
-        0.75 - (fx - 1) ** 2,
-        0.5 * (fx - 0.5) ** 2,
+  // initialize ellipsoid data
+  let initEllipsoids = ti.kernel(() => {
+    for (let i of ti.range(n_ellipsoids)) {
+      // random generate ellipsoid center position
+      ellipsoids[i].center = [
+        ti.random() * 3 - 1.5,
+        ti.random() * 3 - 1.5,
+        ti.random() * 3 - 1.5
       ];
-      F[p] = (
-        [
-          [1.0, 0.0, 0.0],
-          [0.0, 1.0, 0.0],
-          [0.0, 0.0, 1.0],
-        ] +
-        dt * C[p]
-      ).matmul(F[p]);
-      let h = f32(ti.exp(10 * (1.0 - Jp[p])));
-      if (material[p] == JELLY) {
-        h = 0.3;
+      // random generate ellipsoid radii 
+      let base_radius = ti.random();
+      ellipsoids[i].radii = [
+        base_radius,
+        base_radius * (0.1 + ti.random() * 0.5),
+        base_radius * (0.1 + ti.random() * 0.5)
+      ];
+      // random generate color
+      ellipsoids[i].color = [
+        ti.random(),
+        ti.random(),
+        ti.random()
+      ];
+      // random generate rotation matrix
+      let angle_x = ti.random() * Math.PI * 2;
+      let angle_y = ti.random() * Math.PI * 2;
+      let angle_z = ti.random() * Math.PI * 2;
+      // rotation matrix around X axis
+      let rot_x = [
+        [1.0, 0.0, 0.0],
+        [0.0, Math.cos(angle_x), -Math.sin(angle_x)],
+        [0.0, Math.sin(angle_x), Math.cos(angle_x)]
+      ];
+      // rotation matrix around Y axis
+      let rot_y = [
+        [Math.cos(angle_y), 0.0, Math.sin(angle_y)],
+        [0.0, 1.0, 0.0],
+        [-Math.sin(angle_y), 0.0, Math.cos(angle_y)]
+      ];
+      // rotation matrix around Z axis
+      let rot_z = [
+        [Math.cos(angle_z), -Math.sin(angle_z), 0.0],
+        [Math.sin(angle_z), Math.cos(angle_z), 0.0],
+        [0.0, 0.0, 1.0]
+      ];
+      
+      // generate final rotation matrix
+      ellipsoids[i].rotation = rot_z.matmul(rot_y).matmul(rot_x);
+      // set opacity
+      ellipsoids[i].opacity = ti.random();
+    }
+  });
+  
+  // reset camera parameters
+  let resetCamera = ti.kernel(() => {
+    // set camera position
+    camera_pos[0] = [0.0, 0.0, 5.0];
+    camera_lookat[0] = [0.0, 0.0, 0.0];
+    camera_up[0] = [0.0, 1.0, 0.0];
+    // set light position to camera position
+    light_position[0] = camera_pos[0];
+  });
+  
+  // cross product
+  let cross = (a, b) => {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  };
+  
+  // ellipsoid and ray intersection
+  let rayEllipsoidIntersection = (ray_origin, ray_dir, center, radii, rotation) => {
+    // transform ray to ellipsoid local space
+    let oc = [
+      ray_origin[0] - center[0],
+      ray_origin[1] - center[1],
+      ray_origin[2] - center[2]
+    ];
+    
+    // apply inverse rotation
+    let inv_rotation = rotation.transpose();
+    
+    // transform ray direction and origin to ellipsoid local space
+    let local_dir = inv_rotation.matmul(ray_dir);
+    let local_oc = inv_rotation.matmul(oc);
+    
+    // scale ray direction and origin, transform ellipsoid to unit sphere
+    let scaled_dir = [
+      local_dir[0] / radii[0],
+      local_dir[1] / radii[1],
+      local_dir[2] / radii[2]
+    ];
+    
+    let scaled_oc = [
+      local_oc[0] / radii[0],
+      local_oc[1] / radii[1],
+      local_oc[2] / radii[2]
+    ];
+    
+    // solve quadratic equation
+    let a = scaled_dir[0] * scaled_dir[0] + scaled_dir[1] * scaled_dir[1] + scaled_dir[2] * scaled_dir[2];
+    let b = 2.0 * (scaled_oc[0] * scaled_dir[0] + scaled_oc[1] * scaled_dir[1] + scaled_oc[2] * scaled_dir[2]);
+    let c = scaled_oc[0] * scaled_oc[0] + scaled_oc[1] * scaled_oc[1] + scaled_oc[2] * scaled_oc[2] - 1.0;
+    
+    let discriminant = b * b - 4 * a * c;
+    
+    // initialize return values
+    let is_hit = false;
+    let t = 0.0;
+    let normal = [0.0, 0.0, 0.0];
+    
+    // if discriminant is greater than or equal to 0, then there is an intersection
+    if (discriminant >= 0) {
+      // calculate the nearest intersection
+      let t_temp = (-b - Math.sqrt(discriminant)) / (2.0 * a);
+      
+      // if t is less than 0, then the intersection is behind the ray
+      if (t_temp < 0.0001) {
+        t_temp = (-b + Math.sqrt(discriminant)) / (2.0 * a);
       }
-      let mu = mu_0 * h;
-      let la = lambda_0 * h;
-      if (material[p] == WATER) {
-        mu = 0.0;
-      }
-      let svd = ti.svd3D(F[p]);
-      let U = svd.U;
-      let sig = svd.E;
-      let V = svd.V;
-      let J = f32(1.0);
-      for (let d of ti.static(ti.range(3))) {
-        let new_sig = sig[[d, d]];
-        if (material[p] == SNOW) {
-          // Plasticity
-          new_sig = min(max(sig[[d, d]], 1 - 2.5e-2), 1 + 4.5e-3);
-        }
-        Jp[p] = (Jp[p] * sig[[d, d]]) / new_sig;
-        sig[[d, d]] = new_sig;
-        J = J * new_sig;
-      }
-      if (material[p] == WATER) {
-        F[p] = [
-          [J, 0.0, 0.0],
-          [0.0, 1.0, 0.0],
-          [0.0, 0.0, 1.0],
+      
+      // if t is valid
+      if (t_temp >= 0.0001) {
+        is_hit = true;
+        t = t_temp;
+        
+        // calculate the intersection in local space
+        let local_intersection = [
+          local_oc[0] + t * local_dir[0],
+          local_oc[1] + t * local_dir[1],
+          local_oc[2] + t * local_dir[2]
         ];
-      } else if (material[p] == 2) {
-        F[p] = U.matmul(sig).matmul(V.transpose());
-      }
-      let stress =
-        (2 * mu * (F[p] - U.matmul(V.transpose()))).matmul(F[p].transpose()) +
-        [
-          [1.0, 0.0, 0.0],
-          [0.0, 1.0, 0.0],
-          [0.0, 0.0, 1.0],
-        ] *
-          la *
-          J *
-          (J - 1);
-      stress = (-dt * p_vol * 4 * stress) / dx ** 2;
-      let affine = stress + p_mass * C[p];
-      for (let i of ti.static(ti.range(3))) {
-        for (let j of ti.static(ti.range(3))) {
-          for (let k of ti.static(ti.range(3))) {
-            let offset = [i, j, k];
-            let dpos = (f32(offset) - fx) * dx;
-            let weight = w[[i, 0]] * w[[j, 1]] * w[[k, 2]];
-            grid_v[base + offset] +=
-              weight * (p_mass * v[p] + affine.matmul(dpos));
-            grid_m[base + offset] += weight * p_mass;
-          }
-        }
+        
+        // calculate the normal in local space
+        let local_normal = [
+          local_intersection[0] / (radii[0] * radii[0]),
+          local_intersection[1] / (radii[1] * radii[1]),
+          local_intersection[2] / (radii[2] * radii[2])
+        ];
+        
+        // transform the normal to world space and normalize it
+        let world_normal = rotation.matmul(local_normal);
+        let length = Math.sqrt(world_normal[0] * world_normal[0] + world_normal[1] * world_normal[1] + world_normal[2] * world_normal[2]);
+        normal = [world_normal[0] / length, world_normal[1] / length, world_normal[2] / length];
       }
     }
-    for (let I of ndrange(n_grid, n_grid, n_grid)) {
-      let bound = 2;
-      let i = I[0];
-      let j = I[1];
-      let k = I[2];
-      if (grid_m[I] > 0) {
-        grid_v[I] = (1 / grid_m[I]) * grid_v[I];
-      }
-      grid_v[I] = grid_v[I] + dt * gravity[0];
-      if (i < bound && grid_v[I][0] < 0) {
-        grid_v[I][0] = 0;
-      }
-      if (i > n_grid - bound && grid_v[I][0] > 0) {
-        grid_v[I][0] = 0;
-      }
-      if (j < bound && grid_v[I][1] < 0) {
-        grid_v[I][1] = 0;
-      }
-      if (j > n_grid - bound && grid_v[I][1] > 0) {
-        grid_v[I][1] = 0;
-      }
-      if (k < bound && grid_v[I][2] < 0) {
-        grid_v[I][2] = 0;
-      }
-      if (k > n_grid - bound && grid_v[I][2] > 0) {
-        grid_v[I][2] = 0;
-      }
-    }
-    for (let p of range(n_particles)) {
-      let Xp = x[p] / dx;
-      let base = i32(Xp - 0.5);
-      let fx = Xp - base;
-      let w = [
-        0.5 * (1.5 - fx) ** 2,
-        0.75 - (fx - 1.0) ** 2,
-        0.5 * (fx - 0.5) ** 2,
-      ];
-      let new_v = [0.0, 0.0, 0.0];
-      let new_C = [
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0],
-      ];
-      for (let i of ti.static(ti.range(3))) {
-        for (let j of ti.static(ti.range(3))) {
-          for (let k of ti.static(ti.range(3))) {
-            let offset = [i, j, k];
-            let dpos = (f32(offset) - fx) * dx;
-            let g_v = grid_v[base + offset];
-            let weight = w[[i, 0]] * w[[j, 1]] * w[[k, 2]];
-            new_v = new_v + weight * g_v;
-            new_C = new_C + (4 * weight * g_v.outerProduct(dpos)) / (dx * dx);
-          }
-        }
-      }
-      v[p] = new_v;
-      C[p] = new_C;
-      x[p] = x[p] + dt * new_v;
-    }
-  });
+    
+    return { is_hit, t, normal };
+  };
+  ti.addToKernelScope({rayEllipsoidIntersection});
 
-  let reset = ti.kernel(() => {
-    for (let p of range(n_particles)) {
-      let cube_id = i32(ti.floor(p / cube_num_particles));
-      let cube_min = [
-        0.05 + 0.15 * cube_id,
-        0.05 + 0.25 * (cube_id % 3),
-        0.05 + 0.2 * (cube_id % 4),
-      ];
-      let cube_max = cube_min + cube_dim;
-
-      let id_in_cube = p % cube_num_particles;
-
-      let i = i32(id_in_cube % cube_dim_particles);
-      let j = i32(id_in_cube / cube_dim_particles) % cube_dim_particles;
-      let k = i32(id_in_cube / (cube_dim_particles * cube_dim_particles));
-
-      let pos = cube_min + (cube_dim * [i, j, k]) / cube_dim_particles;
-      let jitter =
-        ([ti.random(), ti.random(), ti.random()] * 0.1 * cube_dim) /
-        cube_dim_particles;
-      pos = pos + jitter;
-      x[p] = pos;
-
-      material[p] = JELLY;
-      v[p] = [0, 0, 0];
-      F[p] = [
-        [1 + 1e-6, 0, 0],
-        [0, 1 - 1e-6, 0],
-        [0, 0, 1],
-      ];
-      Jp[p] = 1;
-      C[p] = [
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0],
-      ];
-    }
-  });
-
-  let num_faces = num_cubes * 6;
-  let num_quads_per_face = (cube_dim_particles - 1) ** 2;
-  let num_quads = num_faces * num_quads_per_face;
-  let num_triangles = num_quads * 2;
-  let num_indices = num_triangles * 3;
-
-  let num_vertices_per_face = cube_dim_particles ** 2;
-  let num_vertices = num_faces * num_vertices_per_face;
-
-  let vertex_type = ti.types.struct({
-    pos: ti.types.vector(ti.f32, 3),
-    normal: ti.types.vector(ti.f32, 3),
-  });
-
-  let VBO = ti.field(vertex_type, num_vertices);
-  let IBO = ti.field(ti.i32, num_indices);
-  let vertex_to_particle = ti.field(ti.i32, num_vertices);
-
-  ti.addToKernelScope({
-    VBO,
-    IBO,
-    vertex_to_particle,
-    num_triangles,
-    num_indices,
-    num_vertices,
-    num_quads,
-    num_vertices_per_face,
-    num_quads_per_face,
-  });
-
-  // define the triangle mesh for the surfaces of the cubes
-  let init_ibo_vbo = ti.kernel(() => {
-    for (let quad_id of range(num_quads)) {
-      let face_id = i32(quad_id / num_quads_per_face);
-      let quad_in_face = quad_id % num_quads_per_face;
-
-      let cube_id = i32(face_id / 6);
-      let face_in_cube = face_id % 6;
-      let quad_i = quad_in_face % (cube_dim_particles - 1);
-      let quad_j = i32(quad_in_face / (cube_dim_particles - 1));
-      let di = [0, 0, 0];
-      let dj = [0, 0, 0];
-      let k = [0, 0, 0];
-      if (face_in_cube == 0 || face_in_cube == 1) {
-        di = [1, 0, 0];
-        dj = [0, 1, 0];
-        if (face_in_cube % 2 == 1) {
-          k = [0, 0, cube_dim_particles - 1];
-        }
-      }
-      if (face_in_cube == 2 || face_in_cube == 3) {
-        di = [0, 1, 0];
-        dj = [0, 0, 1];
-        if (face_in_cube % 2 == 1) {
-          k = [cube_dim_particles - 1, 0, 0];
-        }
-      }
-      if (face_in_cube == 4 || face_in_cube == 5) {
-        di = [1, 0, 0];
-        dj = [0, 0, 1];
-        if (face_in_cube % 2 == 1) {
-          k = [0, cube_dim_particles - 1, 0];
-        }
-      }
-
-      let a = quad_i * di + quad_j * dj + k;
-      let b = (quad_i + 1) * di + quad_j * dj + k;
-      let c = quad_i * di + (quad_j + 1) * dj + k;
-      let d = (quad_i + 1) * di + (quad_j + 1) * dj + k;
-
-      let particle_idx_3d_to_1d = (idx) => {
-        return (
-          cube_id * cube_num_particles +
-          idx[0] * cube_dim_particles ** 2 +
-          idx[1] * cube_dim_particles +
-          idx[2]
-        );
-      };
-
-      let a_idx = particle_idx_3d_to_1d(a);
-      let b_idx = particle_idx_3d_to_1d(b);
-      let c_idx = particle_idx_3d_to_1d(c);
-      let d_idx = particle_idx_3d_to_1d(d);
-
-      let v_a =
-        face_id * num_vertices_per_face + quad_i * cube_dim_particles + quad_j;
-      let v_b =
-        face_id * num_vertices_per_face +
-        (quad_i + 1) * cube_dim_particles +
-        quad_j;
-      let v_c =
-        face_id * num_vertices_per_face +
-        quad_i * cube_dim_particles +
-        (quad_j + 1);
-      let v_d =
-        face_id * num_vertices_per_face +
-        (quad_i + 1) * cube_dim_particles +
-        (quad_j + 1);
-
-      vertex_to_particle[v_a] = a_idx;
-      vertex_to_particle[v_b] = b_idx;
-      vertex_to_particle[v_c] = c_idx;
-      vertex_to_particle[v_d] = d_idx;
-
-      if (face_in_cube == 0 || face_in_cube == 2 || face_in_cube == 5) {
-        IBO[quad_id * 6 + 0] = v_a;
-        IBO[quad_id * 6 + 1] = v_b;
-        IBO[quad_id * 6 + 2] = v_c;
-        IBO[quad_id * 6 + 3] = v_b;
-        IBO[quad_id * 6 + 4] = v_d;
-        IBO[quad_id * 6 + 5] = v_c;
-      } else {
-        IBO[quad_id * 6 + 0] = v_a;
-        IBO[quad_id * 6 + 1] = v_c;
-        IBO[quad_id * 6 + 2] = v_b;
-        IBO[quad_id * 6 + 3] = v_c;
-        IBO[quad_id * 6 + 4] = v_d;
-        IBO[quad_id * 6 + 5] = v_b;
-      }
-    }
-  });
-
-  // used for computing per-vertex normal
-  let normal_accum_type = ti.types.struct({
-    count: ti.i32,
-    sum: ti.types.vector(ti.f32, 3),
-  });
-  let normal_accume_buffer = ti.field(normal_accum_type, num_vertices);
-  ti.addToKernelScope({ normal_accume_buffer });
-
-  let update_vbo = ti.kernel(() => {
-    let compute_normal = (a, b, c) => {
-      return (a - b).cross(a - c).normalized();
-    };
-    for (let v of range(num_vertices)) {
-      let p = vertex_to_particle[v];
-      VBO[v].pos = x[p];
-      normal_accume_buffer[v].count = 0;
-      normal_accume_buffer[v].sum = 0;
-    }
-    for (let tri of range(num_triangles)) {
-      let a = IBO[tri * 3 + 0];
-      let b = IBO[tri * 3 + 1];
-      let c = IBO[tri * 3 + 2];
-      let normal = compute_normal(VBO[a].pos, VBO[b].pos, VBO[c].pos);
-      normal_accume_buffer[a].count += 1;
-      normal_accume_buffer[a].sum += normal;
-      normal_accume_buffer[b].count += 1;
-      normal_accume_buffer[b].sum += normal;
-      normal_accume_buffer[c].count += 1;
-      normal_accume_buffer[c].sum += normal;
-    }
-    for (let v of range(num_vertices)) {
-      let accum = normal_accume_buffer[v];
-      VBO[v].normal = accum.sum / accum.count;
-    }
-  });
-
-  let renderTarget = ti.canvasTexture(htmlCanvas);
-  let depth = ti.depthTexture([htmlCanvas.width, htmlCanvas.height]);
-  let aspectRatio = htmlCanvas.width / htmlCanvas.height;
-
-  ti.addToKernelScope({ renderTarget, depth, aspectRatio });
-
+  // render function
   let render = ti.kernel(() => {
-    let center = [0.5, 0.5, 0.5];
-    let eye = [0.5, 0.5, 2.3];
-    let fov = 45;
-    let view = ti.lookAt(eye, center, [0.0, 1.0, 0.0]);
-    let proj = ti.perspective(fov, aspectRatio, 0.1, 100);
-    let mvp = proj.matmul(view);
-
-    let front_light_pos = [0.5, 1.0, 2.0];
-    let front_light_color = [1.0, 1.0, 1.0];
-    let back_light_pos = [0.5, 1.0, -2.0];
-    let back_light_color = [0.75, 0.75, 0.9];
-    let jelly_color = [0.9, 0.3, 0.2];
-
-    ti.clearColor(renderTarget, [0.75, 0.75, 0.9, 1]);
-    ti.useDepth(depth);
-
-    let saturate = (x) => max(0.0, min(1.0, x));
-
-    let schlick = (N, V, IOR) => {
-      let F0 = ((IOR - 1) / (IOR + 1)) ** 2;
-      let F = F0 + (1 - F0) * pow(1 - max(0.0, dot(N, V)), 1);
-      return F;
-    };
-
-    let smoothstep = (edge0, edge1, x) => {
-      let t = (x - edge0) / (edge1 - edge0);
-      t = max(0.0, min(1.0, t));
-      return t * t * (3.0 - 2.0 * t);
-    };
-
-    let reflect = (n, l) => {
-      return 2 * n * n.dot(l) - l;
-    };
-
-    let refract = (N, V, IOR) => {
-      let n = 1 / IOR;
-      let w = n * dot(N, V);
-      let k = sqrt(1 + (w - n) * (w + n));
-      let t = (w - k) * N + n * -V;
-      return t.normalized();
-    };
-
-    let mix = (x, y, a) => {
-      return x * (1.0 - a) + y * a;
-    };
-
-    // vert shader for vertices
-    for (let v of ti.inputVertices(VBO, IBO)) {
-      let pos = mvp.matmul(v.pos.concat([1.0]));
-      ti.outputPosition(pos);
-      ti.outputVertex(v);
-    }
-    // frag shader for vertices
-    for (let f of ti.inputFragments()) {
-      let N = f.normal.normalized();
-      let V = (eye - f.pos).normalized();
-
-      let L_front = (front_light_pos - f.pos).normalized();
-      let L_back = (back_light_pos - f.pos).normalized();
-
-      let IOR = 1.5; // gelatin
-
-      let V_refl = reflect(N, V);
-      let fr = schlick(N, V, IOR);
-
-      let refl_front = front_light_color * V_refl.dot(L_front) * fr;
-      let refl_back = back_light_color * V_refl.dot(L_back) * fr;
-
-      let refr_front =
-        front_light_color *
-        max(0.0, refract(N, V, IOR).dot(L_front)) *
-        (1 - fr) *
-        jelly_color;
-      let refr_back =
-        back_light_color *
-        max(0.0, refract(N, V, IOR).dot(L_back)) *
-        (1 - fr) *
-        jelly_color;
-
-      let color = refl_front + refl_back + refr_back + refr_front;
-      ti.outputColor(renderTarget, color.concat([1.0]));
+    let cam_pos = camera_pos[0];
+    let cam_lookat = camera_lookat[0];
+    let cam_up = camera_up[0];
+    
+    // calculate camera coordinate system
+    let forward = [
+      cam_lookat[0] - cam_pos[0],
+      cam_lookat[1] - cam_pos[1],
+      cam_lookat[2] - cam_pos[2]
+    ];
+    let forward_length = Math.sqrt(forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]);
+    forward = [forward[0] / forward_length, forward[1] / forward_length, forward[2] / forward_length];
+    
+    let right = cross(forward, cam_up);
+    let right_length = Math.sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+    right = [right[0] / right_length, right[1] / right_length, right[2] / right_length];
+    
+    let up = cross(right, forward);
+    let up_length = Math.sqrt(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
+    up = [up[0] / up_length, up[1] / up_length, up[2] / up_length];
+    
+    // field of view parameters
+    let half_height = Math.tan(fov / 2.0);
+    let half_width = half_height * res_x / res_y;
+    
+    // iterate over each pixel
+    for (let i of ti.range(res_x)) {
+      for (let j of ti.range(res_y)) {
+        // calculate normalized pixel coordinates (-1 to 1)
+        let u = (i + 0.5) / res_x * 2 - 1;
+        let v = (j + 0.5) / res_y * 2 - 1;
+        
+        // calculate ray direction
+        let ray_dir = [
+          forward[0] + u * half_width * right[0] + v * half_height * up[0],
+          forward[1] + u * half_width * right[1] + v * half_height * up[1],
+          forward[2] + u * half_width * right[2] + v * half_height * up[2]
+        ];
+        let ray_dir_length = Math.sqrt(ray_dir[0] * ray_dir[0] + ray_dir[1] * ray_dir[1] + ray_dir[2] * ray_dir[2]);
+        ray_dir = [ray_dir[0] / ray_dir_length, ray_dir[1] / ray_dir_length, ray_dir[2] / ray_dir_length];
+        
+        // default use background color
+        let color = background_color;
+        
+        // track the nearest intersection
+        let closest_hit = false;
+        let closest_t = 1e10;
+        let closest_normal = [0.0, 0.0, 0.0];
+        let closest_color = [0.0, 0.0, 0.0];
+        let closest_idx = -1;
+        
+        // detect the intersection between ray and all ellipsoids
+        for (let e_idx of ti.range(n_ellipsoids)) {
+          if (ellipsoids[e_idx].opacity >= opacity_limit) {
+            let result = rayEllipsoidIntersection(
+              cam_pos, 
+              ray_dir, 
+              ellipsoids[e_idx].center, 
+              ellipsoids[e_idx].radii, 
+              ellipsoids[e_idx].rotation
+            );
+            
+            if (result.is_hit && result.t < closest_t) {
+              closest_hit = true;
+              closest_t = result.t;
+              closest_normal = result.normal;
+              closest_color = ellipsoids[e_idx].color;
+              closest_idx = e_idx;
+            }
+          }
+        }
+        
+        // if there is an intersection, calculate shading
+        if (closest_hit) {
+          // calculate the intersection point
+          let hit_point = [
+            cam_pos[0] + closest_t * ray_dir[0],
+            cam_pos[1] + closest_t * ray_dir[1],
+            cam_pos[2] + closest_t * ray_dir[2]
+          ];
+          
+          // calculate lighting
+          let light_dir = [
+            light_position[0][0] - hit_point[0],
+            light_position[0][1] - hit_point[1],
+            light_position[0][2] - hit_point[2]
+          ];
+          let light_dir_length = Math.sqrt(light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2]);
+          light_dir = [light_dir[0] / light_dir_length, light_dir[1] / light_dir_length, light_dir[2] / light_dir_length];
+          
+          let view_dir = [
+            cam_pos[0] - hit_point[0],
+            cam_pos[1] - hit_point[1],
+            cam_pos[2] - hit_point[2]
+          ];
+          let view_dir_length = Math.sqrt(view_dir[0] * view_dir[0] + view_dir[1] * view_dir[1] + view_dir[2] * view_dir[2]);
+          view_dir = [view_dir[0] / view_dir_length, view_dir[1] / view_dir_length, view_dir[2] / view_dir_length];
+          
+          // calculate light attenuation
+          let light_distance = Math.sqrt(
+            (light_position[0][0] - hit_point[0]) * (light_position[0][0] - hit_point[0]) +
+            (light_position[0][1] - hit_point[1]) * (light_position[0][1] - hit_point[1]) +
+            (light_position[0][2] - hit_point[2]) * (light_position[0][2] - hit_point[2])
+          );
+          let attenuation = 1.0 / (1.0 + 0.01 * light_distance + 0.001 * light_distance * light_distance);
+          
+          let diff = Math.max(0.0, closest_normal[0] * light_dir[0] + closest_normal[1] * light_dir[1] + closest_normal[2] * light_dir[2]);
+          let ambient_component = [
+            ambient * closest_color[0],
+            ambient * closest_color[1],
+            ambient * closest_color[2]
+          ];
+          let diffuse_component = [
+            diffuse_strength * diff * closest_color[0] * attenuation,
+            diffuse_strength * diff * closest_color[1] * attenuation,
+            diffuse_strength * diff * closest_color[2] * attenuation
+          ];
+          
+          // do not calculate shadow between ellipsoids
+          color = [
+            ambient_component[0] + diffuse_component[0],
+            ambient_component[1] + diffuse_component[1],
+            ambient_component[2] + diffuse_component[2]
+          ];
+        }
+        
+        // ensure color is in the range of 0 to 1
+        color = [
+          Math.max(0.0, Math.min(1.0, color[0])),
+          Math.max(0.0, Math.min(1.0, color[1])),
+          Math.max(0.0, Math.min(1.0, color[2]))
+        ];
+        
+        // update pixel
+        pixels[i, j] = color;
+      }
     }
   });
 
-  reset();
-  init_ibo_vbo();
-  gravity.set([0], [0, -9.8, 0]);
-  console.log('Try pressing W/A/S/D!');
-  document.addEventListener('keydown', function (event) {
+  // handle keyboard input, change camera position
+  document.addEventListener('keydown', async function (event) {
+    // create a function to update camera position and target point
+    const updateCamera = async (dx, dy, dz) => {
+      // get current camera position and target point
+      const pos = await camera_pos.get([0]);
+      const lookat = await camera_lookat.get([0]);
+      
+      // create updated position array and target point array
+      const newPos = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+      const newLookat = [lookat[0] + dx, lookat[1] + dy, lookat[2] + dz];
+      
+      // set new camera position and target point
+      camera_pos.set([0], newPos);
+      camera_lookat.set([0], newLookat);
+      
+      // update light position to be the same as camera position
+      light_position.set([0], newPos);
+    };
+
     if (event.key.toUpperCase() === 'W') {
-      gravity.set([0], [0, 9.8, 0]);
-    }
-    if (event.key.toUpperCase() === 'A') {
-      gravity.set([0], [-9.8, 0, 0]);
+      // move camera forward
+      await updateCamera(0, 0, -0.1);
     }
     if (event.key.toUpperCase() === 'S') {
-      gravity.set([0], [0, -9.8, 0]);
+      // move camera backward
+      await updateCamera(0, 0, 0.1);
+    }
+    if (event.key.toUpperCase() === 'A') {
+      // move camera left
+      await updateCamera(-0.1, 0, 0);
     }
     if (event.key.toUpperCase() === 'D') {
-      gravity.set([0], [9.8, 0, 0]);
+      // move camera right
+      await updateCamera(0.1, 0, 0);
+    }
+    if (event.key.toUpperCase() === 'Q') {
+      // move camera down
+      await updateCamera(0, -0.1, 0);
+    }
+    if (event.key.toUpperCase() === 'E') {
+      // move camera up
+      await updateCamera(0, 0.1, 0);
+    }
+    if (event.key.toUpperCase() === 'R') {
+      // reset camera
+      resetCamera();
     }
   });
 
-  let i = 0;
+  // initialize ellipsoids and camera
+  initEllipsoids();
+  resetCamera();
+  
+  // render and display
   async function frame() {
     if (window.shouldStop) {
       return;
     }
-    for (let i = 0; i < Math.floor(steps); ++i) {
-      substep();
-    }
-    update_vbo();
     render();
-    i = i + 1;
+    canvas.setImage(pixels);
     requestAnimationFrame(frame);
   }
   await frame();
@@ -536,8 +418,8 @@ let main = async () => {
 const script = document.createElement('script');
 script.addEventListener('load', async function () {
   await main();
-  var h1 = document.getElementById('hint');
-  h1.innerHTML = 'Try pressing W/A/S/D!';
+  var h2 = document.getElementById('hint');
+  h2.innerHTML = 'Try W/A/S/D/Q/E to move the camera, and R to reset the camera position';
 });
 script.src = 'https://unpkg.com/taichi.js/dist/taichi.umd.js';
 // Append to the `head` element
