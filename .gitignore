@@ -176,3 +176,5 @@ cython_debug/
 imgui.ini
 .DS_Store
 results/
+example.png
+example.ply

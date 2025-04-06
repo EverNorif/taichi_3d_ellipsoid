@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>taichi-3d-ellipsoids</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
       body {
         display: flex;
@@ -28,7 +29,8 @@
       }
       .github-link {
         margin-top: 20px;
-        display: inline-block;
+        display: inline-flex;
+        align-items: center;
         padding: 8px 16px;
         background-color: #24292e;
         color: white;
@@ -40,13 +42,19 @@
       .github-link:hover {
         background-color: #0366d6;
       }
+      .github-link i {
+        margin-right: 8px;
+        font-size: 1.2em;
+      }
     </style>
   </head>
 
   <body>
     <h1>Random 3D Ellipsoids Rendering</h1>
     <h2 id="hint">Loading...</h2>
-    <a href="https://github.com/evernorif/taichi_3d_ellipsoid" target="_blank" class="github-link">View GitHub Code</a>
+    <a href="https://github.com/evernorif/taichi_3d_ellipsoid" target="_blank" class="github-link">
+      <i class="fab fa-github"></i> View on GitHub
+    </a>
     <canvas id="result_canvas"></canvas>
     <script src="index.js"></script>
   </body>

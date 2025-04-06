@@ -132,7 +132,7 @@ def load_ellipsoids_from_ply(ply_file_path: str):
     return centers, radii, colors, rotations, opacities
 
 if __name__ == "__main__":
-    example_case = 2 # PARAMETERS HERE
+    example_case = 1 # PARAMETERS HERE
 
     if example_case == 1:
         # generate random ellipsoids

@@ -2,6 +2,13 @@ import os
 import taichi as ti
 from typing import Tuple
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich import box
+
+CONSOLE = Console(width=120)
+
 @ti.dataclass
 class Ellipsoid:
     center: ti.types.vector(3, ti.f32)
@@ -56,6 +63,7 @@ class EllipsoidRenderer:
         # ellipsoid params
         self.ellipsoids = self._initialize_ellipsoids(centers, radii, colors, rotations, opacities, arr_type)
         self.num_ellipsoids = self.ellipsoids.shape[0]
+        self.visible = ti.field(ti.i32, self.num_ellipsoids)
         
         # camera params
         self.res_x, self.res_y = res # width, height
@@ -201,6 +209,35 @@ class EllipsoidRenderer:
         
         return is_hit, t, normal
 
+    @ti.func
+    def is_ellipsoid_visible(self, camera_pos, forward, right, up, half_width, half_height, center, radii):
+        """Check if an ellipsoid is potentially visible in the camera's view frustum"""
+        is_visible = True
+        cam_to_center = center - camera_pos
+        max_radius = ti.max(ti.max(radii[0], radii[1]), radii[2])
+        distance_squared = cam_to_center.dot(cam_to_center)
+        distance = ti.sqrt(distance_squared)
+        
+        # if the ellipsoid center is behind the camera and the distance is greater than the maximum radius, then it is not visible
+        dot_product = cam_to_center.dot(forward)
+        if dot_product < -max_radius:
+            is_visible = False
+        else:
+            # check if the ellipsoid is outside the frustum
+            up_component = cam_to_center.dot(up)
+            right_component = cam_to_center.dot(right)
+            
+            # calculate the frustum boundaries (use dot_product as depth)
+            frustum_height = ti.abs(dot_product) * half_height
+            frustum_width = ti.abs(dot_product) * half_width
+            
+            # if the ellipsoid center plus the radius is outside the frustum, then it is not visible
+            if ti.abs(up_component) > frustum_height + max_radius or \
+               ti.abs(right_component) > frustum_width + max_radius:
+                is_visible = False
+        
+        return is_visible
+
     @ti.kernel
     def render(self):
         camera_pos = self.cam_pos[None]
@@ -216,6 +253,19 @@ class EllipsoidRenderer:
         # field of view parameters
         half_height = ti.tan(fov_radians / 2.0)
         half_width = half_height * self.res_x / self.res_y
+        
+        # preprocess frustum culling
+        for e_idx in range(self.num_ellipsoids):
+            if self.ellipsoids[e_idx].opacity >= self.opacity_limit:
+                if self.is_ellipsoid_visible(
+                    camera_pos, forward, right, up, half_width, half_height,
+                    self.ellipsoids[e_idx].center, self.ellipsoids[e_idx].radii
+                ):
+                    self.visible[e_idx] = 1
+                else:
+                    self.visible[e_idx] = 0
+            else:
+                self.visible[e_idx] = 0
         
         # iterate over each pixel
         for i, j in self.pixels:
@@ -242,7 +292,7 @@ class EllipsoidRenderer:
             
             # detect the intersection between ray and all ellipsoids
             for e_idx in range(self.num_ellipsoids):
-                if self.ellipsoids[e_idx].opacity >= self.opacity_limit:
+                if self.visible[e_idx] == 1:
                     hit, t, normal = self.ray_ellipsoid_intersection(
                         camera_pos, 
                         ray_dir, 
@@ -285,21 +335,34 @@ class EllipsoidRenderer:
             color = ti.min(ti.max(color, 0.0), 1.0)
 
             self.pixels[i, j] = color  # update pixels
-    
+
+    def _print_controls(self):
+        table = Table(show_header=False, box=box.ROUNDED, expand=False, border_style="cyan")
+        table.add_column("Key", style="green bold")
+        table.add_column("Action", style="yellow")
+        
+        table.add_row("[W]", "Move camera forward")
+        table.add_row("[S]", "Move camera backward")
+        table.add_row("[A]", "Move camera left")
+        table.add_row("[D]", "Move camera right")
+        table.add_row("[Q]", "Move camera down")
+        table.add_row("[E]", "Move camera up")
+        table.add_row("[R]", "Reset camera")
+        table.add_row("Mouse move", "Rotate camera")
+        table.add_row("[ESC]", "Exit")
+        
+        panel = Panel(
+            table,
+            title="[bold blue]Ellipsoid Renderer Controls[/bold blue]",
+            subtitle="[italic]Press ESC to exit[/italic]",
+            border_style="cyan",
+            padding=(1, 2)
+        )
+        CONSOLE.print(panel)
+
     def run_gui(self):
         assert not self.headless, "GUI mode is not supported in headless mode"
-        print("""
-        ========= start gui =========
-        [w]: move camera forward
-        [s]: move camera backward
-        [a]: move camera left
-        [d]: move camera right
-        [q]: move camera down
-        [e]: move camera up
-        [r]: reset camera
-        [mouse move]: rotate camera
-        [esc]: exit
-        ============================""")
+        self._print_controls()
         while self.window.running:
             if self.window.get_event(ti.ui.PRESS):
                 if self.window.event.key == ti.ui.ESCAPE:

@@ -21,6 +21,7 @@ let main = async () => {
   
   // create ellipsoid array
   let ellipsoids = ti.field(ellipsoidType, n_ellipsoids);
+  let visible = ti.field(ti.i32, n_ellipsoids);
   
   // rendering parameters
   let res_x = htmlCanvas.width;
@@ -41,6 +42,7 @@ let main = async () => {
   ti.addToKernelScope({
     n_ellipsoids,
     ellipsoids,
+    visible,
     res_x,
     res_y,
     pixels,
@@ -60,9 +62,9 @@ let main = async () => {
     for (let i of ti.range(n_ellipsoids)) {
       // random generate ellipsoid center position
       ellipsoids[i].center = [
-        ti.random() * 3 - 1.5,
-        ti.random() * 3 - 1.5,
-        ti.random() * 3 - 1.5
+        ti.random() * 5 - 2.5,
+        ti.random() * 5 - 2.5,
+        ti.random() * 5 - 2.5
       ];
       // random generate ellipsoid radii 
       let base_radius = ti.random();
@@ -103,7 +105,7 @@ let main = async () => {
       // generate final rotation matrix
       ellipsoids[i].rotation = rot_z.matmul(rot_y).matmul(rot_x);
       // set opacity
-      ellipsoids[i].opacity = ti.random();
+      ellipsoids[i].opacity = 0.2 + 0.8 * ti.random();
     }
   });
   
@@ -207,6 +209,55 @@ let main = async () => {
   };
   ti.addToKernelScope({rayEllipsoidIntersection});
 
+  // View Frustum Culling
+  let isEllipsoidVisible = (camera_pos, forward, right, up, half_width, half_height, center, radii) => {
+    let visible = true;
+    // calculate the vector from camera to ellipsoid center
+    let cam_to_center = [
+      center[0] - camera_pos[0],
+      center[1] - camera_pos[1],
+      center[2] - camera_pos[2]
+    ];
+    
+    // find the maximum radius as the bounding sphere radius
+    let max_radius = Math.max(radii[0], Math.max(radii[1], radii[2]));
+    
+    // calculate the distance from ellipsoid center to camera
+    let distance = Math.sqrt(
+      cam_to_center[0] * cam_to_center[0] + 
+      cam_to_center[1] * cam_to_center[1] + 
+      cam_to_center[2] * cam_to_center[2]
+    );
+    
+    // if the ellipsoid center is behind the camera and the distance is greater than the maximum radius, then it is not visible
+    let dot_product = cam_to_center[0] * forward[0] + 
+                     cam_to_center[1] * forward[1] + 
+                     cam_to_center[2] * forward[2];
+    if (dot_product < -max_radius) {
+      visible = false;
+    } else {
+      // check if the ellipsoid is outside the frustum
+      // calculate the position of the ellipsoid center in the camera space
+      let center_in_cam_space = [
+        dot_product,
+        cam_to_center[0] * up[0] + cam_to_center[1] * up[1] + cam_to_center[2] * up[2],
+        cam_to_center[0] * right[0] + cam_to_center[1] * right[1] + cam_to_center[2] * right[2]
+      ];
+      
+      // calculate the frustum boundaries
+      let frustum_height = distance * half_height;
+      let frustum_width = distance * half_width;
+      
+      // if the ellipsoid center plus the radius is outside the frustum, then it is not visible
+      if (Math.abs(center_in_cam_space[1]) > frustum_height + max_radius ||
+          Math.abs(center_in_cam_space[2]) > frustum_width + max_radius) {
+        visible = false;
+      }
+    }
+    return visible;
+  };
+  ti.addToKernelScope({isEllipsoidVisible});
+
   // render function
   let render = ti.kernel(() => {
     let cam_pos = camera_pos[0];
@@ -259,10 +310,28 @@ let main = async () => {
         let closest_normal = [0.0, 0.0, 0.0];
         let closest_color = [0.0, 0.0, 0.0];
         let closest_idx = -1;
-        
+
+        // preprocess frustum culling
+        for (let e_idx of ti.range(n_ellipsoids)) {
+          if (isEllipsoidVisible(
+            cam_pos, 
+            forward,
+            right,
+            up, 
+            half_width, 
+            half_height, 
+            ellipsoids[e_idx].center, 
+            ellipsoids[e_idx].radii
+          )) {
+            visible[e_idx] = 1;
+          } else {
+            visible[e_idx] = 0;
+          }
+        }
+
         // detect the intersection between ray and all ellipsoids
         for (let e_idx of ti.range(n_ellipsoids)) {
-          if (ellipsoids[e_idx].opacity >= opacity_limit) {
+          if (ellipsoids[e_idx].opacity >= opacity_limit && visible[e_idx] == 1) {
             let result = rayEllipsoidIntersection(
               cam_pos, 
               ray_dir, 
