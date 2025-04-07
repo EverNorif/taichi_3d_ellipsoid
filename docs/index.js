@@ -35,6 +35,10 @@ let main = async () => {
   let ambient = 0.2;
   let diffuse_strength = 0.6;
   let opacity_limit = 0.2;
+  let shininess = 32.0;
+  let specular_strength = 0.5;
+  let shadow_bias = 0.001;
+  let shadow_softness_factor = 0.1;
   
   // rendering result
   let pixels = ti.Vector.field(3, ti.f32, [res_x, res_y]);
@@ -54,7 +58,11 @@ let main = async () => {
     background_color,
     ambient,
     diffuse_strength,
-    opacity_limit
+    opacity_limit,
+    shininess,
+    specular_strength,
+    shadow_bias,
+    shadow_softness_factor
   });
 
   // initialize ellipsoid data
@@ -376,31 +384,83 @@ let main = async () => {
           let view_dir_length = Math.sqrt(view_dir[0] * view_dir[0] + view_dir[1] * view_dir[1] + view_dir[2] * view_dir[2]);
           view_dir = [view_dir[0] / view_dir_length, view_dir[1] / view_dir_length, view_dir[2] / view_dir_length];
           
+          // calculate half direction for specular
+          let half_dir = [
+            light_dir[0] + view_dir[0],
+            light_dir[1] + view_dir[1],
+            light_dir[2] + view_dir[2]
+          ];
+          let half_dir_length = Math.sqrt(half_dir[0] * half_dir[0] + half_dir[1] * half_dir[1] + half_dir[2] * half_dir[2]);
+          half_dir = [half_dir[0] / half_dir_length, half_dir[1] / half_dir_length, half_dir[2] / half_dir_length];
+          
           // calculate light attenuation
           let light_distance = Math.sqrt(
             (light_position[0][0] - hit_point[0]) * (light_position[0][0] - hit_point[0]) +
             (light_position[0][1] - hit_point[1]) * (light_position[0][1] - hit_point[1]) +
             (light_position[0][2] - hit_point[2]) * (light_position[0][2] - hit_point[2])
           );
-          let attenuation = 1.0 / (1.0 + 0.01 * light_distance + 0.001 * light_distance * light_distance);
+          let attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance);
           
-          let diff = Math.max(0.0, closest_normal[0] * light_dir[0] + closest_normal[1] * light_dir[1] + closest_normal[2] * light_dir[2]);
+          // calculate ambient component
           let ambient_component = [
             ambient * closest_color[0],
             ambient * closest_color[1],
             ambient * closest_color[2]
           ];
+          
+          // calculate diffuse component
+          let diff = Math.max(0.0, closest_normal[0] * light_dir[0] + closest_normal[1] * light_dir[1] + closest_normal[2] * light_dir[2]);
           let diffuse_component = [
             diffuse_strength * diff * closest_color[0] * attenuation,
             diffuse_strength * diff * closest_color[1] * attenuation,
             diffuse_strength * diff * closest_color[2] * attenuation
           ];
           
-          // do not calculate shadow between ellipsoids
+          // calculate specular component
+          let spec = Math.pow(
+            Math.max(0.0, closest_normal[0] * half_dir[0] + 
+                         closest_normal[1] * half_dir[1] + 
+                         closest_normal[2] * half_dir[2]), 
+            shininess
+          );
+          let specular_component = [
+            specular_strength * spec * attenuation,
+            specular_strength * spec * attenuation,
+            specular_strength * spec * attenuation
+          ];
+          
+          // calculate shadow factor
+          let shadow_factor = 1.0;
+          let shadow_ray_origin = [
+            hit_point[0] + closest_normal[0] * shadow_bias,
+            hit_point[1] + closest_normal[1] * shadow_bias,
+            hit_point[2] + closest_normal[2] * shadow_bias
+          ];
+          
+          // check for shadow
+          for (let e_idx of ti.range(n_ellipsoids)) {
+            if (visible[e_idx] == 1 && e_idx != closest_idx) {
+              let shadow_result = rayEllipsoidIntersection(
+                shadow_ray_origin,
+                light_dir,
+                ellipsoids[e_idx].center,
+                ellipsoids[e_idx].radii,
+                ellipsoids[e_idx].rotation
+              );
+              
+              if (shadow_result.is_hit) {
+                let shadow_distance = shadow_result.t;
+                let shadow_softness = Math.min(1.0, shadow_distance * shadow_softness_factor);
+                shadow_factor = Math.min(shadow_factor, shadow_softness);
+              }
+            }
+          }
+          
+          // combine components
           color = [
-            ambient_component[0] + diffuse_component[0],
-            ambient_component[1] + diffuse_component[1],
-            ambient_component[2] + diffuse_component[2]
+            ambient_component[0] + (diffuse_component[0] + specular_component[0]) * shadow_factor,
+            ambient_component[1] + (diffuse_component[1] + specular_component[1]) * shadow_factor,
+            ambient_component[2] + (diffuse_component[2] + specular_component[2]) * shadow_factor
           ];
         }
         

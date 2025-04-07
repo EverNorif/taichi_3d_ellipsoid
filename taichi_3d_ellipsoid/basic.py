@@ -35,6 +35,8 @@ class EllipsoidRenderer:
         background_color:Tuple[float, float, float]=(0.05, 0.05, 0.05),
         ambient:float=0.2,
         diffuse_strength:float=0.6,
+        shininess:float=32.0,
+        specular_strength:float=0.5,
         headless:bool=False,
         opacity_limit:float=0.2,
         ti_arch=ti.gpu,
@@ -56,6 +58,8 @@ class EllipsoidRenderer:
             background_color: background color of the image 
             ambient: ambient light of the scene
             diffuse_strength: diffuse strength of the scene
+            shininess: shininess of the scene
+            specular_strength: specular strength of the scene
             headless: whether to run in headless mode
             opacity_limit: opacity limit of the ellipsoids
             ti_arch: taichi arch
@@ -88,6 +92,8 @@ class EllipsoidRenderer:
         # material params
         self.ambient = ambient
         self.diffuse_strength = diffuse_strength
+        self.shininess = shininess
+        self.specular_strength = specular_strength
 
         # ggui window
         self.headless = headless
@@ -141,7 +147,7 @@ class EllipsoidRenderer:
         self.cam_pos[None] = self.camera.curr_position
         self.cam_lookat[None] = self.camera.curr_lookat
         self.cam_up[None] = self.camera.curr_up
-        self.light_position[None] = self.camera.curr_position
+        self.light_position[None] = self.camera.curr_position  # NOTE: light position is the same as the camera position
 
     @ti.func
     def normalize(self, v):
@@ -319,24 +325,45 @@ class EllipsoidRenderer:
                 # calculate the intersection point
                 hit_point = camera_pos + closest_t * ray_dir
                 
-                # light calculation
+                # calculate the light direction and view direction
                 light_dir = self.normalize(self.light_position[None] - hit_point)
                 view_dir = self.normalize(camera_pos - hit_point)
                 
-                # calculate the light attenuation
+                # calculate the half direction for specular reflection
+                half_dir = self.normalize(light_dir + view_dir)
+                
+                # calculate the attenuation of the light
                 light_distance = ti.sqrt((self.light_position[None] - hit_point).dot(self.light_position[None] - hit_point))
-                attenuation = 1.0 / (1.0 + 0.01 * light_distance + 0.001 * light_distance * light_distance)
+                attenuation = 1.0 / (1.0 + 0.09 * light_distance + 0.032 * light_distance * light_distance)
                 
-                diff = max(0.0, closest_normal.dot(light_dir))
                 ambient_component = self.ambient * closest_color
+                diff = max(0.0, closest_normal.dot(light_dir))
                 diffuse_component = self.diffuse_strength * diff * closest_color * attenuation
-                specular_component = 0.0
+                spec = ti.pow(max(0.0, closest_normal.dot(half_dir)), self.shininess)
+                specular_component = self.specular_strength * spec * ti.Vector([1.0, 1.0, 1.0]) * attenuation
                 
-                color = ambient_component + diffuse_component + specular_component
-                
-                # don't process shadow between each ellipsoid
                 shadow_factor = 1.0
-                color = ambient_component + (diffuse_component + specular_component) * shadow_factor
+                shadow_ray_origin = hit_point + closest_normal * 0.001  # avoid self-intersection
+                shadow_ray_dir = light_dir
+
+                # calculate the shadow factor
+                for e_idx in range(self.num_ellipsoids):
+                    if self.visible[e_idx] == 1 and e_idx != closest_idx:
+                        shadow_hit, shadow_t, _ = self.ray_ellipsoid_intersection(
+                            shadow_ray_origin,
+                            shadow_ray_dir,
+                            self.ellipsoids[e_idx].center,
+                            self.ellipsoids[e_idx].radii,
+                            self.ellipsoids[e_idx].rotation
+                        )
+                        
+                        if shadow_hit:
+                            shadow_distance = shadow_t * shadow_ray_dir.dot(shadow_ray_dir)
+                            shadow_softness = ti.min(1.0, shadow_distance * 0.1)
+                            shadow_factor = ti.min(shadow_factor, shadow_softness)
+                
+                color = ambient_component + \
+                        (diffuse_component + specular_component) * shadow_factor
             
             color = ti.min(ti.max(color, 0.0), 1.0)
 
