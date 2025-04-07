@@ -1,7 +1,7 @@
 import numpy as np
 import taichi as ti
 
-from taichi_3d_ellipsoid.basic import EllipsoidRenderer
+from taichi_3d_ellipsoid import EllipsoidRayTracingRenderer
 
 def euler_to_rotation_matrix(euler_angles):
     rx, ry, rz = euler_angles[0], euler_angles[1], euler_angles[2]
@@ -136,12 +136,12 @@ if __name__ == "__main__":
 
     if example_case == 1:
         # generate random ellipsoids
-        print("Example 1: random ellipsoids from numpy")
+        print("Example 1: random ellipsoids from numpy with ray tracing")
         centers, radii, colors, rotations, opacities = random_generate_ellipsoids(
             num_ellipsoids=500, # PARAMETERS HERE
             box_size=10.0 # PARAMETERS HERE
         )
-        renderer = EllipsoidRenderer(
+        renderer = EllipsoidRayTracingRenderer(
             centers=centers,
             radii=radii,
             colors=colors,
@@ -151,11 +151,11 @@ if __name__ == "__main__":
         )
         renderer.run_gui()
     elif example_case == 2:
-        print("Example 2: load ellipsoids from 3dgs ply file")
+        print("Example 2: load ellipsoids from 3dgs ply file and render with ray tracing")
         centers, radii, colors, rotations, opacities = load_ellipsoids_from_ply(
             ply_file_path="example.ply" # PARAMETERS HERE
         )
-        renderer = EllipsoidRenderer(
+        renderer = EllipsoidRayTracingRenderer(
             centers=centers,
             radii=radii,
             colors=colors,
