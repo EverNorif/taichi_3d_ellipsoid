@@ -28,23 +28,54 @@
         height: auto;
       }
       .github-link {
-        margin-top: 20px;
+        margin-top: 0;
         display: inline-flex;
         align-items: center;
-        padding: 8px 16px;
+        justify-content: center;
+        padding: 6px 20px;
         background-color: #24292e;
         color: white;
         text-decoration: none;
-        border-radius: 4px;
+        border-radius: 6px;
         font-weight: bold;
         transition: background-color 0.3s;
+        height: 36px;
+        width: 160px;
+        font-size: 14px;
+        box-sizing: border-box;
       }
       .github-link:hover {
-        background-color: #0366d6;
+        background-color: #2f363d;
       }
       .github-link i {
         margin-right: 8px;
-        font-size: 1.2em;
+        font-size: 16px;
+      }
+      .switch-container {
+        margin: 10px 0;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .switch-button {
+        padding: 6px 20px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background-color 0.3s;
+        height: 36px;
+        width: 160px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .switch-button:hover {
+        background-color: #45a049;
+      }
+      .switch-button.active {
+        background-color: #2E7D32;
       }
     </style>
   </head>
@@ -52,10 +83,56 @@
   <body>
     <h1>Random 3D Ellipsoids Rendering</h1>
     <h2 id="hint">Loading...</h2>
-    <a href="https://github.com/evernorif/taichi_3d_ellipsoid" target="_blank" class="github-link">
-      <i class="fab fa-github"></i> View on GitHub
-    </a>
+    <div class="switch-container">
+      <button class="switch-button active" id="rasterization-btn">Rasterization</button>
+      <button class="switch-button" id="raytracing-btn">Raytracing</button>
+      <a href="https://github.com/evernorif/taichi_3d_ellipsoid" target="_blank" class="github-link">
+        <i class="fab fa-github"></i> GitHub
+      </a>
+    </div>
+
     <canvas id="result_canvas"></canvas>
-    <script src="index.js"></script>
+    <script>
+      let currentScript = null;
+      let currentRenderer = null;
+      
+      function cleanup() {
+        if (currentRenderer && typeof currentRenderer.cleanup === 'function') {
+          currentRenderer.cleanup();
+        }
+        if (currentScript) {
+          document.body.removeChild(currentScript);
+        }
+      }
+
+      function loadScript(src) {
+        cleanup();
+        
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = () => {
+          setTimeout(() => {
+            if (window.initRenderer) {
+              currentRenderer = window.initRenderer();
+            }
+          }, 100);
+        };
+        document.body.appendChild(script);
+        currentScript = script;
+      }
+
+      document.getElementById('rasterization-btn').addEventListener('click', () => {
+        document.getElementById('rasterization-btn').classList.add('active');
+        document.getElementById('raytracing-btn').classList.remove('active');
+        loadScript('index_rasterization.js');
+      });
+
+      document.getElementById('raytracing-btn').addEventListener('click', () => {
+        document.getElementById('raytracing-btn').classList.add('active');
+        document.getElementById('rasterization-btn').classList.remove('active');
+        loadScript('index_raytracing.js');
+      });
+      loadScript('index_rasterization.js');
+    </script>
   </body>
 </html>

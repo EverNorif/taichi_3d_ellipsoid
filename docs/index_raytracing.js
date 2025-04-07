@@ -553,3 +553,15 @@ script.addEventListener('load', async function () {
 script.src = 'https://unpkg.com/taichi.js/dist/taichi.umd.js';
 // Append to the `head` element
 document.head.appendChild(script);
+
+window.initRenderer = async () => {
+  await main();
+  return {
+    cleanup: () => {
+      // 清理资源
+      if (window.ti) {
+        window.ti.reset();
+      }
+    }
+  };
+};
