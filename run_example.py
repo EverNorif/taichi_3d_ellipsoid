@@ -1,7 +1,7 @@
 import numpy as np
 import taichi as ti
 
-from taichi_3d_ellipsoid import EllipsoidRayTracingRenderer
+from taichi_3d_ellipsoid import EllipsoidRayTracingRenderer, EllipsoidRasterizationRenderer
 
 def euler_to_rotation_matrix(euler_angles):
     rx, ry, rz = euler_angles[0], euler_angles[1], euler_angles[2]
@@ -156,6 +156,45 @@ if __name__ == "__main__":
             ply_file_path="example.ply" # PARAMETERS HERE
         )
         renderer = EllipsoidRayTracingRenderer(
+            centers=centers,
+            radii=radii,
+            colors=colors,
+            rotations=rotations,
+            opacities=opacities,
+            arr_type="numpy",
+            opacity_limit=0.2,
+            background_color=(0.5, 0.5, 0.5),
+            headless=True,
+            ti_arch=ti.gpu,  # NOTE: if you use Mac, please change to ti.vulkan, otherwise the image can be incomplete
+        )
+        renderer.render_image(
+            output_path="example.png",
+            camera_pos=(0.0, -0.6, 0.0),
+            camera_lookat=(0, 0, 0),
+            camera_up=(0, 0, 1),
+        )
+    elif example_case == 3:
+        # generate random ellipsoids
+        print("Example 3: random ellipsoids from numpy with rasterization")
+        centers, radii, colors, rotations, opacities = random_generate_ellipsoids(
+            num_ellipsoids=500, # PARAMETERS HERE
+            box_size=10.0 # PARAMETERS HERE
+        )
+        renderer = EllipsoidRasterizationRenderer(
+            centers=centers,
+            radii=radii,
+            colors=colors,
+            rotations=rotations,
+            opacities=opacities,
+            arr_type="numpy"
+        )
+        renderer.run_gui()
+    elif example_case == 4:
+        print("Example 4: load ellipsoids from 3dgs ply file and render with rasterization")
+        centers, radii, colors, rotations, opacities = load_ellipsoids_from_ply(
+            ply_file_path="example.ply" # PARAMETERS HERE
+        )
+        renderer = EllipsoidRasterizationRenderer(
             centers=centers,
             radii=radii,
             colors=colors,

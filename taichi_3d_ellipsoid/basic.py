@@ -178,6 +178,74 @@ class EllipsoidRenderer:
         
         return is_visible
 
+    @ti.func
+    def ray_ellipsoid_intersection(self, ray_origin, ray_dir, center, radii, rotation):
+        """calculate the intersection between ray and ellipsoid"""
+        # transform ray to ellipsoid local space
+        oc = ray_origin - center
+        
+        # apply the inverse rotation
+        # rotation is a forward rotation matrix, its transpose is the inverse rotation (because rotation matrix is orthogonal)
+        inv_rotation = rotation.transpose()
+        
+        # transform ray direction and origin to ellipsoid local space
+        local_dir = inv_rotation @ ray_dir
+        local_oc = inv_rotation @ oc
+        
+        # scale ray direction and origin, transform ellipsoid to unit sphere
+        scaled_dir = ti.Vector([
+            local_dir[0] / radii[0],
+            local_dir[1] / radii[1],
+            local_dir[2] / radii[2]
+        ])
+        scaled_oc = ti.Vector([
+            local_oc[0] / radii[0],
+            local_oc[1] / radii[1],
+            local_oc[2] / radii[2]
+        ])
+        
+        # solve quadratic equation
+        a = scaled_dir.dot(scaled_dir)
+        b = 2.0 * scaled_oc.dot(scaled_dir)
+        c = scaled_oc.dot(scaled_oc) - 1.0  # 1.0 is the square of the radius of the unit sphere
+        
+        discriminant = b * b - 4 * a * c
+        
+        # initialize return values
+        is_hit = False
+        t = 0.0
+        normal = ti.Vector([0.0, 0.0, 0.0])
+        
+        # if discriminant is greater than or equal to 0, there is an intersection
+        if discriminant >= 0:
+            # calculate the nearest intersection
+            t_temp = (-b - ti.sqrt(discriminant)) / (2.0 * a)
+            
+            # if t is less than 0, the intersection point is in the opposite direction of the ray
+            if t_temp < 0.0001:
+                t_temp = (-b + ti.sqrt(discriminant)) / (2.0 * a)
+            
+            # if t is valid
+            if t_temp >= 0.0001:
+                is_hit = True
+                t = t_temp
+                
+                # calculate the intersection point in local space
+                local_intersection = local_oc + t * local_dir
+                
+                # calculate the normal in local space
+                local_normal = ti.Vector([
+                    local_intersection[0] / (radii[0] * radii[0]),
+                    local_intersection[1] / (radii[1] * radii[1]),
+                    local_intersection[2] / (radii[2] * radii[2])
+                ])
+                
+                # transform normal to world space and normalize
+                # note: normal transformation needs to use rotation matrix instead of its inverse
+                normal = (rotation @ local_normal).normalized()
+        
+        return is_hit, t, normal
+    
     @ti.kernel
     def render(self):
         """render the ellipsoids"""

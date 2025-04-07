@@ -51,78 +51,6 @@ class EllipsoidRayTracingRenderer(EllipsoidRenderer):
             device=device,
         )
 
-    @ti.func
-    def normalize(self, v):
-        return v / ti.sqrt(v.dot(v))
-
-    @ti.func
-    def ray_ellipsoid_intersection(self, ray_origin, ray_dir, center, radii, rotation):
-        """calculate the intersection between ray and ellipsoid"""
-        # transform ray to ellipsoid local space
-        oc = ray_origin - center
-        
-        # apply the inverse rotation
-        # rotation is a forward rotation matrix, its transpose is the inverse rotation (because rotation matrix is orthogonal)
-        inv_rotation = rotation.transpose()
-        
-        # transform ray direction and origin to ellipsoid local space
-        local_dir = inv_rotation @ ray_dir
-        local_oc = inv_rotation @ oc
-        
-        # scale ray direction and origin, transform ellipsoid to unit sphere
-        scaled_dir = ti.Vector([
-            local_dir[0] / radii[0],
-            local_dir[1] / radii[1],
-            local_dir[2] / radii[2]
-        ])
-        scaled_oc = ti.Vector([
-            local_oc[0] / radii[0],
-            local_oc[1] / radii[1],
-            local_oc[2] / radii[2]
-        ])
-        
-        # solve quadratic equation
-        a = scaled_dir.dot(scaled_dir)
-        b = 2.0 * scaled_oc.dot(scaled_dir)
-        c = scaled_oc.dot(scaled_oc) - 1.0  # 1.0 is the square of the radius of the unit sphere
-        
-        discriminant = b * b - 4 * a * c
-        
-        # initialize return values
-        is_hit = False
-        t = 0.0
-        normal = ti.Vector([0.0, 0.0, 0.0])
-        
-        # if discriminant is greater than or equal to 0, there is an intersection
-        if discriminant >= 0:
-            # calculate the nearest intersection
-            t_temp = (-b - ti.sqrt(discriminant)) / (2.0 * a)
-            
-            # if t is less than 0, the intersection point is in the opposite direction of the ray
-            if t_temp < 0.0001:
-                t_temp = (-b + ti.sqrt(discriminant)) / (2.0 * a)
-            
-            # if t is valid
-            if t_temp >= 0.0001:
-                is_hit = True
-                t = t_temp
-                
-                # calculate the intersection point in local space
-                local_intersection = local_oc + t * local_dir
-                
-                # calculate the normal in local space
-                local_normal = ti.Vector([
-                    local_intersection[0] / (radii[0] * radii[0]),
-                    local_intersection[1] / (radii[1] * radii[1]),
-                    local_intersection[2] / (radii[2] * radii[2])
-                ])
-                
-                # transform normal to world space and normalize
-                # note: normal transformation needs to use rotation matrix instead of its inverse
-                normal = self.normalize(rotation @ local_normal)
-        
-        return is_hit, t, normal
-
     @ti.kernel
     def render(self):
         camera_pos = self.cam_pos[None]
@@ -131,9 +59,9 @@ class EllipsoidRayTracingRenderer(EllipsoidRenderer):
         fov_radians = self.start_fov * ti.math.pi / 180.0
         
         # calculate the camera coordinate system
-        forward = self.normalize(camera_lookat - camera_pos)
-        right = self.normalize(ti.math.cross(forward, camera_up))
-        up = self.normalize(ti.math.cross(right, forward))
+        forward = (camera_lookat - camera_pos).normalized()
+        right = ti.math.cross(forward, camera_up).normalized()
+        up = ti.math.cross(right, forward).normalized()
         
         # field of view parameters
         half_height = ti.tan(fov_radians / 2.0)
@@ -159,11 +87,11 @@ class EllipsoidRayTracingRenderer(EllipsoidRenderer):
             v = (j + 0.5) / self.res_y * 2 - 1
             
             # calculate the ray direction
-            ray_dir = self.normalize(
+            ray_dir = (
                 forward + 
                 u * half_width * right + 
                 v * half_height * up
-            )
+            ).normalized()
             
             # default use the background color
             color = self.background_color
@@ -199,11 +127,11 @@ class EllipsoidRayTracingRenderer(EllipsoidRenderer):
                 hit_point = camera_pos + closest_t * ray_dir
                 
                 # calculate the light direction and view direction
-                light_dir = self.normalize(self.light_position[None] - hit_point)
-                view_dir = self.normalize(camera_pos - hit_point)
+                light_dir = (self.light_position[None] - hit_point).normalized()
+                view_dir = (camera_pos - hit_point).normalized()
                 
                 # calculate the half direction for specular reflection
-                half_dir = self.normalize(light_dir + view_dir)
+                half_dir = (light_dir + view_dir).normalized()
                 
                 # calculate the attenuation of the light
                 light_distance = ti.sqrt((self.light_position[None] - hit_point).dot(self.light_position[None] - hit_point))
