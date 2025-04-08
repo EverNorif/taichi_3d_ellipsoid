@@ -9,3 +9,4 @@ __version__ = "0.1.0"
 
 from .ray_tracing import EllipsoidRayTracingRenderer
 from .rasterization import EllipsoidRasterizationRenderer
+from .basic import EllipsoidRenderer
